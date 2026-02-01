@@ -7,7 +7,10 @@ import { UserEntity } from 'src/auth/entity/user.entity';
 import { OrderItemEntity } from './entity/order-item.entity';
 import { InventoryService } from 'src/inventory/inventory.service';
 
-
+/**
+ * Handles order lifecycle:
+ * cart checkout, order creation and inventory reservation.
+ */
 @Injectable()
 export class OrdersService {
     constructor(
@@ -23,8 +26,16 @@ export class OrdersService {
         private readonly inventoryService: InventoryService,
     ) { }
 
+    /**
+ * Checkout flow:
+ * - validates active cart
+ * - creates immutable order snapshot
+ * - reserves inventory stock
+ * - closes cart to prevent reuse
+ */
     async checkout(user: UserEntity) {
-        // 1. ACTIVE cart
+
+        // Find active cart for current user
         const cart = await this.cartRepo.findOne({
             where: {
                 user: { id: user.id },
@@ -34,10 +45,10 @@ export class OrdersService {
         });
 
         if (!cart || cart.items.length === 0) {
-            throw new BadRequestException('კალათა ცარიელია');
+            throw new BadRequestException('No active cart found or cart is empty');
         }
 
-        // 2. calculate total
+        // Calculate total price and create order item snapshots
         let total = 0;
 
         const orderItems = cart.items.map(item => {
@@ -51,7 +62,7 @@ export class OrdersService {
             });
         });
 
-        // 3. create order
+        // Create order with immutable product data
         const order = this.orderRepo.create({
             user,
             status: OrderStatus.PENDING,
@@ -59,10 +70,10 @@ export class OrdersService {
             items: orderItems,
         });
 
-        // 4. save order
+
         await this.orderRepo.save(order);
 
-        //  4.1 reserve inventory  
+        // Reserve inventory stock to prevent overselling during payment
         for (const item of order.items) {
             await this.inventoryService.reserve(
                 item.productId,
@@ -70,7 +81,7 @@ export class OrdersService {
             );
         }
 
-        // 5. close cart
+        // Close cart after successful checkout
         cart.status = CartStatus.CHECKED_OUT;
         await this.cartRepo.save(cart);
 
@@ -78,7 +89,9 @@ export class OrdersService {
 
     }
 
-
+/**
+ * Returns authenticated user's orders with calculated item subtotals.
+ */
     async getMyOrders(user: UserEntity) {
         const orders = await this.orderRepo.find({
             where: {

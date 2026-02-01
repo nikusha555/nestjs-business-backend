@@ -14,7 +14,10 @@ import { Like } from 'typeorm';
 import { InventoryService } from 'src/inventory/inventory.service';
 import { UserEntity } from 'src/auth/entity/user.entity';
 
-
+/**
+ * Manages product catalog, categories and related business logic.
+ * Also coordinates inventory creation for new products.
+ */
 
 @Injectable()
 export class ProductsService {
@@ -35,17 +38,23 @@ export class ProductsService {
         private readonly inventoryService: InventoryService,
     ) { }
 
+    /**
+ * Returns all products ordered by creation date.
+ */
     async findAll(): Promise<ProductEntity[]> {
         return this.productRepository.find({
             order: { created_at: 'DESC' },
-            // relations: ['images'], // load images automatically
+
         });
     }
 
+    /**
+ * Returns single product by ID.
+ */
     async findOne(id: number): Promise<ProductEntity> {
         const oneProduct = await this.productRepository.findOne({
             where: { id },
-            // relations: ['images'], // load images automatically
+
         });
         if (!oneProduct) {
             throw new NotFoundException(`Product with ID ${id} not found`);
@@ -53,31 +62,35 @@ export class ProductsService {
         return oneProduct;
     }
 
+    /**
+ * Returns products filtered by category.
+ */
     async findByCategory(categoryId: number): Promise<ProductEntity[]> {
         const categoryProducts = await this.productRepository.find({
             where: { category: { id: categoryId } },
-            // relations: ['images'], // load images automatically
+
         });
         if (!categoryProducts) {
             throw new NotFoundException(`Product with ID ${categoryId} not found`);
         }
         return categoryProducts;
     }
- 
+
 
     async getAllUserEmails(): Promise<string[]> {
         const users = await this.userRepository.find({
-            select: ['email'], // efficient query
+            select: ['email'],
         });
 
         return users
             .map(user => user.email)
-            .filter(email => !!email); // remove null/undefined
+            .filter(email => !!email);
     }
 
 
-    // პროდუქტის დამატება
-
+    /**
+     * Creates a new product and initializes inventory stock.
+     */
     async createProduct(dto: CreateProductDto) {
         const category = await this.categoryRepository.findOne({
             where: { id: dto.categoryId },
@@ -95,18 +108,18 @@ export class ProductsService {
 
         const savedProduct = await this.productRepository.save(product);
 
-        // 👇 quantity goes to INVENTORY
+        // Initialize inventory for the newly created product
         await this.inventoryService.createForProduct(
             savedProduct,
             dto.quantity,
         );
 
-        // 👇 GET ALL USER EMAILS
+
         const emails = await this.getAllUserEmails();
 
-       
 
-        // 👇 WebSocket notification
+
+        // Notify clients about new product (WebSocket)
         this.productsGateway.notifyNewProduct(savedProduct);
 
         return savedProduct;
@@ -114,7 +127,7 @@ export class ProductsService {
 
 
 
-    // პროდუქტის განახლება
+
 
     async updateProduct(id: number, dto: UpdateProductDto) {
         const product = await this.productRepository.findOne({ where: { id } });
@@ -136,7 +149,10 @@ export class ProductsService {
 
 
 
-
+    /**
+     * Filters products by price range.
+     * Optionally converts price to target currency.
+     */
     async filterProducts(minPrice?: number, maxPrice?: number, currency?: string) {
         const qb = this.productRepository.createQueryBuilder('product');
 
@@ -145,13 +161,13 @@ export class ProductsService {
 
         const products = await qb.getMany();
 
-        // If no currency provided → return normal products
+        // Convert prices only if currency is provided
         if (!currency) return products;
 
-        // Get real-time exchange rate
+
         const rate = await this.getRate(currency);
 
-        // Convert each product price
+
         return products.map(p => ({
             ...p,
             price_converted: +(p.price * rate).toFixed(2),
@@ -161,9 +177,11 @@ export class ProductsService {
     }
 
 
-
+    /**
+     * Fetches real-time exchange rate for currency conversion.
+     */
     async getRate(targetCurrency: string): Promise<number> {
-        // Always convert from GEL (lari)
+       
         const url = `https://api.exchangerate.host/latest?base=GEL&symbols=${targetCurrency.toUpperCase()}`;
 
         const response = await firstValueFrom(this.http.get(url));

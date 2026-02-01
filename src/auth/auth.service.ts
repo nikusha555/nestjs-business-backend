@@ -12,9 +12,14 @@ export class AuthService {
         private userRepository: Repository<UserEntity>,
     ) { }
 
+    /**
+   * Validates user credentials.
+   * Returns user entity if credentials are correct.
+   */
     async validateUser(username: string, password: string): Promise<UserEntity | null> {
         const user = await this.userRepository.findOne({ where: { username } });
 
+        // Simple password comparison (no hashing for this project yet)
         if (user && user.password === password) {
             return user;
         }
@@ -22,6 +27,9 @@ export class AuthService {
         return null;
     }
 
+    /**
+      * Handles user login and JWT token generation.
+      */
     async login(username: string, password: string) {
         const user = await this.validateUser(username, password);
 
@@ -29,16 +37,16 @@ export class AuthService {
             return { message: 'Invalid credentials' };
         }
 
-        // 1️⃣ Create a payload (data inside token)
+
         const payload = {
             id: user.id,
             username: user.username,
         };
 
-        // 2️⃣ Sign the token (like creating a secret message)
-        const token = jwt.sign(payload, JWT_SECRET, { expiresIn: '1h' }); 
+        // Generate short-lived JWT token
+        const token = jwt.sign(payload, JWT_SECRET, { expiresIn: '1h' });
 
-        // 3️⃣ Return the token to frontend
+
         return {
             message: 'Login successful',
             token,

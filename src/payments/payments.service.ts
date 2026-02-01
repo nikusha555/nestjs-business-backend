@@ -8,7 +8,10 @@ import { InventoryService } from 'src/inventory/inventory.service';
 import { DataSource } from 'typeorm';
 
 
-
+/**
+ * Handles payment creation and confirmation.
+ * Ensures inventory and order consistency using database transactions.
+ */
 @Injectable()
 export class PaymentsService {
     constructor(
@@ -22,17 +25,22 @@ export class PaymentsService {
         private readonly dataSource: DataSource,
     ) { }
 
+    /**
+ * Creates Stripe payment intent for pending order.
+ */
     async createPayment(orderId: number) {
         const order = await this.orderRepo.findOne({
             where: { id: orderId },
         });
 
+        // Only pending orders can be paid
         if (!order || order.status !== OrderStatus.PENDING) {
             throw new BadRequestException('Order not payable');
         }
 
+        // Create Stripe PaymentIntent using order total
         const paymentIntent = await stripe.paymentIntents.create({
-            amount: Math.round(order.total * 100), // cents
+            amount: Math.round(order.total * 100),
             currency: 'usd',
             metadata: {
                 orderId: order.id.toString(),
@@ -53,8 +61,13 @@ export class PaymentsService {
         };
     }
 
-
+    /**
+     * Confirms successful payment.
+     * Updates inventory, payment and order atomically using transaction.
+     */
     async confirmPayment(providerPaymentId: string, orderId: number) {
+        // Transaction ensures inventory, payment and order
+        // are updated atomically (all-or-nothing)
         return this.dataSource.transaction(async (manager) => {
             const payment = await manager.findOne(Payment, {
                 where: { providerPaymentId },
@@ -65,6 +78,7 @@ export class PaymentsService {
                 throw new NotFoundException('Payment not found');
             }
 
+            // Idempotency: prevent double confirmation on repeated webhooks
             if (payment.status === PaymentStatus.SUCCESS) {
                 return payment;
             }
@@ -73,7 +87,7 @@ export class PaymentsService {
                 throw new BadRequestException('Order mismatch');
             }
 
-            // 🔥 inventory confirm (atomic)
+            // Final stock reduction after successful payment
             for (const item of payment.order.items) {
                 await this.inventoryService.confirm(
                     item.productId,
@@ -81,6 +95,7 @@ export class PaymentsService {
                 );
             }
 
+            // Mark payment and order as completed
             payment.status = PaymentStatus.SUCCESS;
             payment.order.status = OrderStatus.PAID;
 
