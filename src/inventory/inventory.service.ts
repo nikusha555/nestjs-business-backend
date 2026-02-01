@@ -24,7 +24,7 @@ export class InventoryService {
             reserved: 0,
         });
 
-        console.log('INVENTORY CREATE QTY:', qty, typeof qty);
+        
 
         return this.inventoryRepo.save(inventory);
     }
